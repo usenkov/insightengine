@@ -1,0 +1,52 @@
+* Host localhost:3001 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:3001...
+* Connected to localhost (::1) port 3001
+* using HTTP/1.x
+> POST /api/upload HTTP/1.1
+
+> Host: localhost:3001
+
+> User-Agent: curl/8.13.0
+
+> Accept: */*
+
+> Content-Length: 220
+
+> Content-Type: multipart/form-data; boundary=------------------------9iGjIDD7bfHaKsmUQLWGSr
+
+> 
+
+} [220 bytes data]
+* upload completely sent off: 220 bytes
+
+100   220    0     0  100   220      0    179  0:00:01  0:00:01 --:--:--   179< HTTP/1.1 500 Internal Server Error
+
+< X-Powered-By: Express
+
+< Access-Control-Allow-Origin: *
+
+< Content-Type: application/json; charset=utf-8
+
+< Content-Length: 63
+
+< ETag: W/"3f-rQIFDmKKAXzUVmvSJ+VTsOYuVxs"
+
+< Date: Wed, 19 Nov 2025 19:41:48 GMT
+
+< Connection: keep-alive
+
+< Keep-Alive: timeout=5
+
+< 
+
+{ [63 bytes data]
+
+{"error":"Cannot read properties of undefined (reading 'uri')"}
+100   283  100    63  100   220     32    113  0:00:01  0:00:01 --:--:--   146
+100   283  100    63  100   220     32    113  0:00:01  0:00:01 --:--:--   146
+* Connection #0 to host localhost left intact
