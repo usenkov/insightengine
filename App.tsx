@@ -3,7 +3,8 @@ import * as Lucide from 'lucide-react';
 import { Header } from './components/Header';
 import { StudioLayout } from './components/Studio/StudioLayout';
 import { RECENT_NOTEBOOKS } from './constants';
-import { ViewState } from './types';
+import { ViewState, Message } from './types';
+import AudioPlayer from './components/AudioPlayer';
 
 const { useState } = React;
 
@@ -118,6 +119,74 @@ const UploadModal: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
 export default function App() {
   const [view, setView] = useState<ViewState>('landing');
 
+  // Chat State
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+
+  // Audio State
+  const [audioScript, setAudioScript] = useState([]);
+  const [showAudioPlayer, setShowAudioPlayer] = useState(false);
+  const [audioState, setAudioState] = useState<'idle' | 'generating' | 'playing'>('idle');
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!inputValue.trim()) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: inputValue,
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setInputValue('');
+    setIsThinking(true);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMsg.text }),
+      });
+      const data = await response.json();
+      
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: data.content || "I'm sorry, I couldn't generate a response.",
+        citations: data.citations ? data.citations.map((c: any, i: number) => i + 1) : [],
+      };
+      setMessages(prev => [...prev, aiMsg]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: "Sorry, there was an error connecting to the server.",
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
+  const handleGenerateAudio = async () => {
+    setAudioState('generating');
+    try {
+        const response = await fetch('http://localhost:3001/api/audio', { method: 'POST' });
+        const data = await response.json();
+        if (data.script) {
+            setAudioScript(data.script);
+            setShowAudioPlayer(true);
+            setAudioState('playing');
+        }
+    } catch (error) {
+        console.error("Audio error:", error);
+        setAudioState('idle');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
       <Header currentView={view} onLogoClick={() => setView('landing')} />
@@ -132,7 +201,19 @@ export default function App() {
         )}
 
         {view === 'studio' && (
-          <StudioLayout />
+          <StudioLayout 
+            messages={messages}
+            inputValue={inputValue}
+            setInputValue={setInputValue}
+            isThinking={isThinking}
+            onSendMessage={handleSendMessage}
+            audioState={audioState}
+            onGenerateAudio={handleGenerateAudio}
+          />
+        )}
+
+        {showAudioPlayer && (
+            <AudioPlayer script={audioScript} onClose={() => { setShowAudioPlayer(false); setAudioState('idle'); }} />
         )}
       </main>
     </div>

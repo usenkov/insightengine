@@ -2,18 +2,29 @@ import * as React from 'react';
 import * as Lucide from 'lucide-react';
 import { MOCK_SOURCES } from '../../constants';
 import { Message } from '../../types';
-import { AudioOverlay } from './AudioOverlay';
+
 
 const { useState, useRef, useEffect } = React;
 
-export const StudioLayout: React.FC = () => {
-  // Chat State
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
+interface StudioLayoutProps {
+  messages: Message[];
+  inputValue: string;
+  setInputValue: (val: string) => void;
+  isThinking: boolean;
+  onSendMessage: (e?: React.FormEvent) => void;
+  audioState: 'idle' | 'generating' | 'playing';
+  onGenerateAudio: () => void;
+}
 
-  // Audio State
-  const [audioState, setAudioState] = useState<'idle' | 'generating' | 'playing'>('idle');
+export const StudioLayout: React.FC<StudioLayoutProps> = ({
+  messages,
+  inputValue,
+  setInputValue,
+  isThinking,
+  onSendMessage,
+  audioState,
+  onGenerateAudio
+}) => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll chat
@@ -22,40 +33,6 @@ export const StudioLayout: React.FC = () => {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, isThinking]);
-
-  const handleSendMessage = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputValue.trim()) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: inputValue,
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    setInputValue('');
-    setIsThinking(true);
-
-    // Simulate AI Response
-    setTimeout(() => {
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        text: "Based on the Q3 Financial Report, the revenue growth was primarily driven by the Asia-Pacific expansion and the new 'Horizon' product line. The operational costs, however, increased by 12% due to supply chain adjustments.",
-        citations: [1, 2],
-      };
-      setMessages(prev => [...prev, aiMsg]);
-      setIsThinking(false);
-    }, 1500);
-  };
-
-  const handleGenerateAudio = () => {
-    setAudioState('generating');
-    setTimeout(() => {
-      setAudioState('playing'); // Auto play after generation for demo
-    }, 2000);
-  };
 
   return (
     <div className="flex h-[calc(100vh-64px)] bg-white overflow-hidden">
@@ -148,12 +125,12 @@ export const StudioLayout: React.FC = () => {
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              onKeyDown={(e) => e.key === 'Enter' && onSendMessage()}
               placeholder="Ask a question about your sources..."
               className="flex-1 outline-none text-gray-700 placeholder-gray-400"
             />
             <button 
-              onClick={() => handleSendMessage()}
+              onClick={() => onSendMessage()}
               disabled={!inputValue.trim() || isThinking}
               className={`p-2 rounded-full transition-colors ${inputValue.trim() ? 'bg-black text-white hover:bg-gray-800' : 'bg-gray-100 text-gray-300'}`}
             >
@@ -182,7 +159,7 @@ export const StudioLayout: React.FC = () => {
           
           {audioState === 'idle' && (
             <button 
-              onClick={handleGenerateAudio}
+              onClick={onGenerateAudio}
               className="w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-all shadow-sm flex items-center justify-center gap-2"
             >
               Generate
@@ -201,7 +178,7 @@ export const StudioLayout: React.FC = () => {
 
           {audioState === 'playing' && (
             <button 
-              onClick={() => setAudioState('playing')} // Keeps visual state active
+              onClick={() => {}} // Keeps visual state active
               className="w-full py-2 px-4 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-all shadow-sm flex items-center justify-center gap-2"
             >
               <Lucide.Play size={16} fill="currentColor" />
@@ -226,7 +203,7 @@ export const StudioLayout: React.FC = () => {
         </div>
       </div>
 
-      {audioState === 'playing' && <AudioOverlay onClose={() => setAudioState('idle')} />}
+
 
     </div>
   );
