@@ -88,6 +88,15 @@ export default function App() {
     setFiles(prev => prev.map((f, i) => i === index ? { ...f, checked: !f.checked } : f));
   };
 
+  const deleteFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    // If we deleted all files, clear the current file context
+    if (files.length === 1) {
+      setCurrentFileUri(null);
+      setCurrentFileMimeType(null);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
@@ -252,6 +261,15 @@ export default function App() {
   // STUDIO VIEW
   return (
     <div className="flex h-screen bg-white overflow-hidden">
+      {/* Hidden file input for uploading more files in studio view */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        accept=".pdf,.txt,.md,.csv"
+      />
+
       <aside className="w-80 border-r border-gray-200 flex flex-col bg-gray-50/50">
         <div className="p-4 border-b border-gray-200 flex items-center gap-2">
           <div className="bg-blue-600 text-white p-1 rounded">
@@ -266,16 +284,25 @@ export default function App() {
           </div>
           <div className="space-y-3">
             {files.map((file, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div key={i} className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded-lg shadow-sm group">
                 <div className="mt-0.5 text-red-500"><Lucide.FileText size={16} /></div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{file.name}</p>
                 </div>
-                <div 
-                  onClick={() => toggleFile(i)}
-                  className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition-colors ${file.checked ? 'bg-blue-500 text-white' : 'border border-gray-300 bg-white'}`}
-                >
-                  {file.checked && <Lucide.Check size={10} />}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => deleteFile(i)}
+                    className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Delete file"
+                  >
+                    <Lucide.Trash2 size={14} />
+                  </button>
+                  <div
+                    onClick={() => toggleFile(i)}
+                    className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition-colors ${file.checked ? 'bg-blue-500 text-white' : 'border border-gray-300 bg-white'}`}
+                  >
+                    {file.checked && <Lucide.Check size={10} />}
+                  </div>
                 </div>
               </div>
             ))}
