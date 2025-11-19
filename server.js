@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
+import multer from 'multer';
 
 const app = express();
 app.use(cors());
@@ -20,37 +21,72 @@ if (!GEMINI_API_KEY) {
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+// Configure Multer
+const upload = multer({ dest: 'uploads/' });
+
+// Ensure uploads directory exists
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
+
 // --- ROUTE 1: UPLOAD (File Manager) ---
-app.post('/api/upload', async (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
-    console.log("Uploading sample file...");
+    console.log("Uploading file...");
     
-    // For this prototype, we upload a local sample file.
-    // In a real app, you'd use 'multer' to handle the incoming file from req.
-    const filePath = 'sample_data.txt';
-    
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "Sample file not found on server." });
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded." });
     }
+
+    const filePath = req.file.path;
+    let mimeType = req.file.mimetype;
+    const displayName = req.file.originalname;
+
+    // FIX: Force text/plain for .txt files if detected as generic binary
+    if (mimeType === 'application/octet-stream' && displayName.endsWith('.txt')) {
+      mimeType = 'text/plain';
+    }
+
+    console.log(`Received file: ${displayName} (${mimeType})`);
 
     // Upload to Gemini
     const uploadResult = await ai.files.upload({
       file: filePath,
       config: { 
-        mimeType: 'text/plain',
-        displayName: 'Global Market Trends Report' 
+        mimeType: mimeType,
+        displayName: displayName 
       }
     });
 
-    console.log(`File Uploaded: ${uploadResult.file.uri}`);
+    console.log("Raw Upload Result Keys:", Object.keys(uploadResult));
+
+    // Handle different SDK response structures
+    const fileData = uploadResult.file || uploadResult;
+    
+    // The URI might be in 'uri' or 'name' (files/...)
+    const fileUri = fileData.uri || fileData.name;
+
+    if (!fileUri) {
+      throw new Error(`Could not determine file URI from result: ${JSON.stringify(uploadResult)}`);
+    }
+
+    console.log(`File Uploaded to Gemini: ${fileUri}`);
+
+    // Clean up local file
+    fs.unlinkSync(filePath);
 
     res.json({ 
-      uri: uploadResult.file.uri, 
-      name: uploadResult.file.displayName 
+      uri: fileUri, 
+      name: displayName, 
+      mimeType: mimeType
     });
 
   } catch (error) {
     console.error("Upload Error:", error);
+    // Try to clean up if error occurred
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -58,8 +94,10 @@ app.post('/api/upload', async (req, res) => {
 // --- ROUTE 2: CHAT AGENT (RAG) ---
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, fileUri } = req.body;
-    console.log("Received Chat:", message, "File:", fileUri || "None");
+    const { message, fileUri, mimeType } = req.body;
+    console.log("Received Chat:", message);
+    console.log("File URI:", fileUri || "None");
+    console.log("Mime Type:", mimeType || "Defaulting to text/plain");
 
     let contents = [];
     
@@ -68,7 +106,7 @@ app.post('/api/chat', async (req, res) => {
       contents = [{
         role: 'user',
         parts: [
-          { fileData: { mimeType: 'text/plain', fileUri: fileUri } },
+          { fileData: { mimeType: mimeType || 'text/plain', fileUri: fileUri } },
           { text: message }
         ]
       }];
@@ -78,7 +116,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const result = await ai.models.generateContent({
-      model: 'gemini-1.5-flash', // Flash supports PDF/Text and is fast
+      model: 'models/gemini-1.5-flash',
       contents: contents,
       config: { temperature: 0.7 }
     });
@@ -102,7 +140,7 @@ app.post('/api/chat', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Chat Error:", error);
+    console.error("Chat Error Full Object:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     res.status(500).json({ error: error.message });
   }
 });
@@ -113,7 +151,7 @@ app.post('/api/audio', async (req, res) => {
     console.log("Generating Audio Script...");
     
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp', 
+      model: 'models/gemini-2.0-flash-exp', 
       config: { 
         responseMimeType: "application/json",
         systemInstruction: `You are a podcast producer. Generate a short, lively 2-person dialogue (Host vs Expert) about "Global Market Trends". Output strictly an array of JSON objects with "speaker" and "text" keys.`

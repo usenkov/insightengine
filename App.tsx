@@ -21,6 +21,9 @@ export default function App() {
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [currentFileUri, setCurrentFileUri] = useState<string | null>(null);
+  const [currentFileMimeType, setCurrentFileMimeType] = useState<string | null>(null);
+
+  const [files, setFiles] = useState<{ name: string; type: string; checked: boolean }[]>([]);
 
   const scrollRef = useRef(null);
 
@@ -30,27 +33,59 @@ export default function App() {
     }
   }, [messages, isThinking]);
 
-  const handleUpload = async () => {
-    // Simulate upload delay and call backend
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
     try {
-      const response = await fetch(`${API_BASE}/api/upload`, { method: 'POST' });
+      const response = await fetch(`${API_BASE}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) throw new Error("Upload failed");
+
       const data = await response.json();
       if (data.uri) {
         setCurrentFileUri(data.uri);
+        setCurrentFileMimeType(data.mimeType);
+        
+        // Add to files list
+        setFiles(prev => [...prev, { 
+          name: data.name, 
+          type: data.mimeType?.includes('pdf') ? 'PDF' : 'TXT', 
+          checked: true 
+        }]);
+
         setMessages(prev => [...prev, { 
           id: Date.now(), 
           role: 'model', 
           content: `I've processed "${data.name}". You can now ask questions about it!`, 
           citations: [] 
         }]);
+        
+        // Switch to studio view after successful upload
+        setTimeout(() => {
+          setView('studio');
+        }, 1000);
       }
     } catch (error) {
       console.error("Upload failed:", error);
+      alert("Failed to upload file. Please try again.");
     }
-    
-    setTimeout(() => {
-      setView('studio');
-    }, 1500);
+  };
+
+  const toggleFile = (index: number) => {
+    setFiles(prev => prev.map((f, i) => i === index ? { ...f, checked: !f.checked } : f));
   };
 
   const handleSendMessage = async (e) => {
@@ -69,7 +104,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: inputValue,
-          fileUri: currentFileUri 
+          fileUri: currentFileUri,
+          mimeType: currentFileMimeType
         })
       });
 
@@ -174,16 +210,24 @@ export default function App() {
             <p className="text-gray-500">Upload documents to create your notebook</p>
           </div>
 
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            className="hidden" 
+            accept=".pdf,.txt,.md,.csv"
+          />
+
           <div className="grid grid-cols-4 gap-4 mb-8">
             {[
-              { icon: Lucide.Folder, label: "Drive", color: "text-blue-600 bg-blue-50" },
-              { icon: Lucide.FileText, label: "PDF / Text", color: "text-red-600 bg-red-50" },
-              { icon: Lucide.Link, label: "Link", color: "text-emerald-600 bg-emerald-50" },
-              { icon: Lucide.MoreHorizontal, label: "Paste Text", color: "text-purple-600 bg-purple-50" }
+              { icon: Lucide.Folder, label: "Drive", color: "text-blue-600 bg-blue-50", action: () => {} },
+              { icon: Lucide.FileText, label: "PDF / Text", color: "text-red-600 bg-red-50", action: handleUploadClick },
+              { icon: Lucide.Link, label: "Link", color: "text-emerald-600 bg-emerald-50", action: () => {} },
+              { icon: Lucide.MoreHorizontal, label: "Paste Text", color: "text-purple-600 bg-purple-50", action: () => {} }
             ].map((opt, i) => (
               <button 
                 key={i}
-                onClick={handleUpload}
+                onClick={opt.action}
                 className="flex flex-col items-center justify-center p-6 border border-gray-100 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group"
               >
                 <div className={`w-10 h-10 ${opt.color} rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
@@ -218,24 +262,28 @@ export default function App() {
         <div className="p-4 flex-1 overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Sources</h3>
-            <button className="p-1 hover:bg-gray-200 rounded"><Lucide.Plus size={16} /></button>
+            <button onClick={handleUploadClick} className="p-1 hover:bg-gray-200 rounded"><Lucide.Plus size={16} /></button>
           </div>
           <div className="space-y-3">
-            {[
-              { name: "Q3 Financial Report.pdf", type: "PDF" },
-              { name: "Market Analysis.txt", type: "TXT" },
-              { name: "Competitor Overview.pdf", type: "PDF" }
-            ].map((file, i) => (
+            {files.map((file, i) => (
               <div key={i} className="flex items-start gap-3 p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="mt-0.5 text-red-500"><Lucide.FileText size={16} /></div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{file.name}</p>
                 </div>
-                <div className="w-4 h-4 bg-blue-500 rounded flex items-center justify-center text-white">
-                  <Lucide.Check size={10} />
+                <div 
+                  onClick={() => toggleFile(i)}
+                  className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition-colors ${file.checked ? 'bg-blue-500 text-white' : 'border border-gray-300 bg-white'}`}
+                >
+                  {file.checked && <Lucide.Check size={10} />}
                 </div>
               </div>
             ))}
+            {files.length === 0 && (
+               <div className="text-center p-4 text-gray-400 text-sm">
+                 No sources added yet.
+               </div>
+            )}
           </div>
         </div>
       </aside>
