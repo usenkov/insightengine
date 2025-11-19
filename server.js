@@ -2,7 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleAIFileManager } from '@google/generative-ai/server';
 import multer from 'multer';
 
 const app = express();
@@ -19,7 +20,8 @@ if (!GEMINI_API_KEY) {
 }
 
 // Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const fileManager = new GoogleAIFileManager(GEMINI_API_KEY);
 
 // Configure Multer
 const upload = multer({ dest: 'uploads/' });
@@ -50,35 +52,34 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     console.log(`Received file: ${displayName} (${mimeType})`);
 
     // Upload to Gemini
-    const uploadResult = await ai.files.upload({
-      file: filePath,
-      config: { 
-        mimeType: mimeType,
-        displayName: displayName 
-      }
+    const uploadResult = await fileManager.uploadFile(filePath, {
+      mimeType: mimeType,
+      displayName: displayName
     });
 
-    console.log("Raw Upload Result Keys:", Object.keys(uploadResult));
+    console.log(`File Uploaded to Gemini: ${uploadResult.file.uri}`);
 
-    // Handle different SDK response structures
-    const fileData = uploadResult.file || uploadResult;
-    
-    // The URI might be in 'uri' or 'name' (files/...)
-    const fileUri = fileData.uri || fileData.name;
-
-    if (!fileUri) {
-      throw new Error(`Could not determine file URI from result: ${JSON.stringify(uploadResult)}`);
+    // Wait for file to be processed
+    let file = await fileManager.getFile(uploadResult.file.name);
+    while (file.state === 'PROCESSING') {
+      console.log('Waiting for file to be processed...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      file = await fileManager.getFile(uploadResult.file.name);
     }
 
-    console.log(`File Uploaded to Gemini: ${fileUri}`);
+    if (file.state === 'FAILED') {
+      throw new Error('File processing failed');
+    }
+
+    console.log(`File ready: ${file.state}`);
 
     // Clean up local file
     fs.unlinkSync(filePath);
 
-    res.json({ 
-      uri: fileUri, 
-      name: displayName, 
-      mimeType: mimeType
+    res.json({
+      uri: file.uri,  // Returns full URI for Gemini Chat API
+      name: file.displayName,
+      mimeType: file.mimeType
     });
 
   } catch (error) {
@@ -99,38 +100,28 @@ app.post('/api/chat', async (req, res) => {
     console.log("File URI:", fileUri || "None");
     console.log("Mime Type:", mimeType || "Defaulting to text/plain");
 
-    let contents = [];
+    // Use gemini-2.0-flash which supports fileData
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    let parts = [];
     
     if (fileUri) {
       // RAG Mode: Include the file in the context
-      contents = [{
-        role: 'user',
-        parts: [
-          { fileData: { mimeType: mimeType || 'text/plain', fileUri: fileUri } },
-          { text: message }
-        ]
-      }];
+      parts = [
+        {
+          fileData: {
+            mimeType: mimeType || 'text/plain',
+            fileUri: fileUri
+          }
+        },
+        { text: message }
+      ];
     } else {
       // Standard Mode
-      contents = [{ role: 'user', parts: [{ text: message }] }];
+      parts = [{ text: message }];
     }
 
-    const result = await ai.models.generateContent({
-      model: 'models/gemini-1.5-flash',
-      contents: contents,
-      config: { temperature: 0.7 }
-    });
-
-    // Defensive Check
-    if (!result || !result.response || typeof result.response.text !== 'function') {
-      console.error("❌ Invalid Response from Gemini (Chat):", JSON.stringify(result, null, 2));
-      return res.status(500).json({ 
-        role: 'model', 
-        content: "I'm sorry, I'm having trouble connecting to the brain right now. Please try again.",
-        citations: []
-      });
-    }
-
+    const result = await model.generateContent(parts);
     const text = result.response.text();
 
     res.json({
@@ -140,8 +131,22 @@ app.post('/api/chat', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Chat Error Full Object:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-    res.status(500).json({ error: error.message });
+    console.error("Chat Error:", error);
+
+    // Provide more detailed error messages
+    let errorMessage = error.message;
+    if (error.message?.includes('API key')) {
+      errorMessage = 'Invalid API key. Please check your GEMINI_API_KEY.';
+    } else if (error.message?.includes('file')) {
+      errorMessage = 'Error accessing uploaded file. Please try uploading again.';
+    } else if (error.message?.includes('quota')) {
+      errorMessage = 'API quota exceeded. Please try again later.';
+    }
+
+    res.status(500).json({
+      error: errorMessage,
+      details: error.message
+    });
   }
 });
 
@@ -150,20 +155,17 @@ app.post('/api/audio', async (req, res) => {
   try {
     console.log("Generating Audio Script...");
     
-    const result = await ai.models.generateContent({
-      model: 'models/gemini-2.0-flash-exp', 
-      config: { 
-        responseMimeType: "application/json",
-        systemInstruction: `You are a podcast producer. Generate a short, lively 2-person dialogue (Host vs Expert) about "Global Market Trends". Output strictly an array of JSON objects with "speaker" and "text" keys.`
-      },
-      contents: [{ role: 'user', parts: [{ text: "Generate script." }] }]
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.0-flash-exp',
+      systemInstruction: `You are a podcast producer. Generate a short, lively 2-person dialogue (Host vs Expert) about "Global Market Trends". Output strictly an array of JSON objects with "speaker" and "text" keys.`
     });
 
-    // Defensive Check
-    if (!result || !result.response || typeof result.response.text !== 'function') {
-      console.error("❌ Invalid Response from Gemini (Audio):", JSON.stringify(result, null, 2));
-      return res.status(500).json({ error: "Failed to generate audio script from AI." });
-    }
+    const result = await model.generateContent("Generate script.", {
+      generationConfig: {
+        temperature: 0.7,
+        responseMimeType: "application/json"
+      }
+    });
 
     const text = result.response.text();
     

@@ -69,12 +69,21 @@ export default function AudioPlayer({
             <p className="text-xs text-gray-500">Deep Dive Podcast</p>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 hover:bg-gray-200 rounded-full"
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsPlaying(!isPlaying)}
+            className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-200 rounded-full"
+          >
+            <X size={18} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {safeScript.map((line, idx) => (
