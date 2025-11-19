@@ -1,10 +1,11 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { GoogleGenAI } = require('@google/genai');
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import fs from 'fs';
+import { GoogleGenAI } from '@google/genai';
 
 const app = express();
-app.use(cors()); // Allow frontend to talk to backend
+app.use(cors());
 app.use(express.json());
 
 // --- CONFIGURATION ---
@@ -19,28 +20,85 @@ if (!GEMINI_API_KEY) {
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-// --- ROUTE 1: CHAT AGENT (RAG) ---
+// --- ROUTE 1: UPLOAD (File Manager) ---
+app.post('/api/upload', async (req, res) => {
+  try {
+    console.log("Uploading sample file...");
+    
+    // For this prototype, we upload a local sample file.
+    // In a real app, you'd use 'multer' to handle the incoming file from req.
+    const filePath = 'sample_data.txt';
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Sample file not found on server." });
+    }
+
+    // Upload to Gemini
+    const uploadResult = await ai.files.upload({
+      file: filePath,
+      config: { 
+        mimeType: 'text/plain',
+        displayName: 'Global Market Trends Report' 
+      }
+    });
+
+    console.log(`File Uploaded: ${uploadResult.file.uri}`);
+
+    res.json({ 
+      uri: uploadResult.file.uri, 
+      name: uploadResult.file.displayName 
+    });
+
+  } catch (error) {
+    console.error("Upload Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- ROUTE 2: CHAT AGENT (RAG) ---
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message } = req.body;
-    console.log("Received Chat:", message);
+    const { message, fileUri } = req.body;
+    console.log("Received Chat:", message, "File:", fileUri || "None");
 
-    // Mocking RAG for now - In Phase 3 we connect the real File Store
-    // But we use the REAL Gemini 3 model to generate the answer
-    const model = ai.models.get({ model: 'gemini-3-pro-preview' });
+    let contents = [];
     
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: message }] }],
-      generationConfig: { temperature: 0.7 }
+    if (fileUri) {
+      // RAG Mode: Include the file in the context
+      contents = [{
+        role: 'user',
+        parts: [
+          { fileData: { mimeType: 'text/plain', fileUri: fileUri } },
+          { text: message }
+        ]
+      }];
+    } else {
+      // Standard Mode
+      contents = [{ role: 'user', parts: [{ text: message }] }];
+    }
+
+    const result = await ai.models.generateContent({
+      model: 'gemini-1.5-flash', // Flash supports PDF/Text and is fast
+      contents: contents,
+      config: { temperature: 0.7 }
     });
+
+    // Defensive Check
+    if (!result || !result.response || typeof result.response.text !== 'function') {
+      console.error("❌ Invalid Response from Gemini (Chat):", JSON.stringify(result, null, 2));
+      return res.status(500).json({ 
+        role: 'model', 
+        content: "I'm sorry, I'm having trouble connecting to the brain right now. Please try again.",
+        citations: []
+      });
+    }
 
     const text = result.response.text();
 
     res.json({
       role: 'model',
       content: text,
-      // Mock citations until we connect the real File Store ID
-      citations: [{ title: 'Market Analysis.txt', uri: '#' }]
+      citations: fileUri ? [{ title: 'Uploaded Document', uri: '#' }] : []
     });
 
   } catch (error) {
@@ -49,25 +107,36 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// --- ROUTE 2: AUDIO PRODUCER ---
-// This generates the script for your missing Audio Card
+// --- ROUTE 3: AUDIO PRODUCER ---
 app.post('/api/audio', async (req, res) => {
   try {
     console.log("Generating Audio Script...");
     
-    const model = ai.models.get({ 
-      model: 'gemini-3-pro-preview',
-      systemInstruction: `You are a podcast producer. Generate a short, lively 2-person dialogue (Host vs Expert) about "Global Market Trends". Output strictly an array of JSON objects with "speaker" and "text" keys.`
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp', 
+      config: { 
+        responseMimeType: "application/json",
+        systemInstruction: `You are a podcast producer. Generate a short, lively 2-person dialogue (Host vs Expert) about "Global Market Trends". Output strictly an array of JSON objects with "speaker" and "text" keys.`
+      },
+      contents: [{ role: 'user', parts: [{ text: "Generate script." }] }]
     });
 
-    const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: "Generate script." }] }],
-        generationConfig: { 
-            responseMimeType: "application/json" 
-        }
-    });
+    // Defensive Check
+    if (!result || !result.response || typeof result.response.text !== 'function') {
+      console.error("❌ Invalid Response from Gemini (Audio):", JSON.stringify(result, null, 2));
+      return res.status(500).json({ error: "Failed to generate audio script from AI." });
+    }
 
-    const script = JSON.parse(result.response.text());
+    const text = result.response.text();
+    
+    let script;
+    try {
+      script = JSON.parse(text);
+    } catch (e) {
+      console.error("❌ JSON Parse Error:", text);
+      return res.status(500).json({ error: "Failed to parse audio script." });
+    }
+
     res.json({ script });
 
   } catch (error) {
